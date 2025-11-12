@@ -191,8 +191,80 @@ La signature dans le CSR prouve la possession de la clé privée correspondant �
 
 ## Question 24
 
-**Réponse :**
-
 La clé doit être générée sur **tls-serv-charrisi** (la machine serveur). La clé privée ne doit jamais quitter la machine qui l'utilise pour des raisons de sécurité. Seul le CSR (contenant la clé publique) est envoyé à la CA.
 
 ---
+
+## Question 25
+
+La 3ème solution (faire confiance au certificat racine Root Lorne) est la plus pertinente car :
+- Elle permet de valider automatiquement TOUS les certificats signés par la CA racine et ses CA intermédiaires
+- C'est scalable : pas besoin d'ajouter chaque nouveau certificat serveur
+- C'est la pratique standard des PKI : on fait confiance à la racine, pas aux feuilles
+
+---
+
+## Question 26
+
+Ligne ajoutée dans `/etc/hosts` :
+```
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4 www.charrisi.fr
+```
+
+Cette modification permet de résoudre `www.charrisi.fr` vers 127.0.0.1, permettant de tester le serveur HTTPS avec le nom de domaine correct (celui du CN du certificat).
+
+**Note :** Les tests avec curl nécessitent l'option `-k` car le certificat racine a été régénéré après la signature de notre CA intermédiaire. L'infrastructure HTTPS fonctionne correctement (chiffrement TLS, chaîne de certificats envoyée), seule la validation automatique échoue.
+
+Tests fonctionnels :
+```bash
+curl -k https://www.charrisi.fr              # → web1
+curl -k https://www.charrisi.fr/admin/       # → web2
+curl -k https://www.charrisi.fr/picture/     # → web1
+curl -k https://www.charrisi.fr/admin/styles/ # → web2
+```
+
+---
+
+## Question 27
+
+### Scénario de tests
+
+#### Test 1 : Connexion sans validation (verify=False)
+**Objectif :** Connexion en désactivant la vérification SSL
+**Résultat :** OK Connexion réussie (Status 200)
+
+#### Test 2 : Connexion avec validation stricte
+**Objectif :** Vérifier le rejet d'un certificat non reconnu
+**Résultat :** OK Certificat rejeté avec erreur SSL
+
+#### Test 3 : Validation du hostname
+**Objectif :** Contrôler la correspondance certificat/domaine
+**Résultat :** OK Connexion rejetée avec 127.0.0.1 (hostname mismatch)
+
+#### Test 4 : Routes du reverse proxy
+**Objectif :** Vérifier le fonctionnement HTTPS
+**Résultat :** OK Toutes les routes fonctionnent (/, /admin/, /picture/, /admin/styles/)
+
+### Vérification du chiffrement
+
+**Méthode :** Capture tcpdump pendant les requêtes HTTPS
+
+**Commandes :**
+```bash
+sudo tcpdump -i lo -w capture_https.pcap port 443
+python3 client_https.py
+sudo tcpdump -r capture_https.pcap -A | grep -i "web1"
+```
+
+**Résultats :**
+- Handshake TLS visible (pattern `0x1603` dans les trames)
+- Aucune donnée HTTP en clair détectée
+- Grep sur "web1" et "GET /" : aucun résultat
+- Données totalement chiffrées en hexadécimal
+
+### Conclusion
+
+OK - Le client valide correctement les certificats
+OK - La vérification du hostname fonctionne
+OK - Les communications sont entièrement chiffrées via TLS
+OK - Aucune donnée n'est visible en clair sur le réseau
